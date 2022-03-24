@@ -935,7 +935,13 @@ func (ra *RegistrationAuthorityImpl) FinalizeOrder(ctx context.Context, req *rap
 		return nil, err
 	}
 
-	err = csrlib.VerifyCSR(ctx, csrOb, ra.maxNames, &ra.keyPolicy, ra.PA)
+	if order.TypeIdentifier == string(identifier.JWT) {
+		//TODO GB: Verify CSR as jwt csr
+		//TODO GB: Validate public key
+	} else {
+		err = csrlib.VerifyCSR(ctx, csrOb, ra.maxNames, &ra.keyPolicy, ra.PA)
+	}
+
 	if err != nil {
 		// VerifyCSR returns berror instances that can be passed through as-is
 		// without wrapping.
@@ -985,7 +991,8 @@ func (ra *RegistrationAuthorityImpl) FinalizeOrder(ctx context.Context, req *rap
 	// We use IssuerNameID 0 here because (as of now) only the v1 flow sets this
 	// field. This v2 flow allows the CA to select the issuer based on the CSR's
 	// PublicKeyAlgorithm.
-	cert, err := ra.issueCertificate(ctx, issueReq, accountID(order.RegistrationID), orderID(order.Id), issuance.IssuerNameID(0))
+	cert, err := ra.issueCertificate(ctx, issueReq, accountID(order.RegistrationID),
+		orderID(order.Id), issuance.IssuerNameID(0), order.TypeIdentifier)
 	if err != nil {
 		// Fail the order. The problem is computed using
 		// `web.ProblemDetailsForError`, the same function the WFE uses to convert
@@ -1043,7 +1050,8 @@ func (ra *RegistrationAuthorityImpl) issueCertificate(
 	req core.CertificateRequest,
 	acctID accountID,
 	oID orderID,
-	issuerNameID issuance.IssuerNameID) (core.Certificate, error) {
+	issuerNameID issuance.IssuerNameID,
+	typeIdentifier string) (core.Certificate, error) {
 	// Construct the log event
 	logEvent := certificateRequestEvent{
 		ID:          core.NewToken(),
@@ -1055,7 +1063,7 @@ func (ra *RegistrationAuthorityImpl) issueCertificate(
 	beeline.AddFieldToTrace(ctx, "order.id", oID)
 	beeline.AddFieldToTrace(ctx, "acct.id", acctID)
 	var result string
-	cert, err := ra.issueCertificateInner(ctx, req, acctID, oID, issuerNameID, &logEvent)
+	cert, err := ra.issueCertificateInner(ctx, req, acctID, oID, issuerNameID, &logEvent, typeIdentifier)
 	if err != nil {
 		logEvent.Error = err.Error()
 		beeline.AddFieldToTrace(ctx, "issuance.error", err)
@@ -1087,7 +1095,8 @@ func (ra *RegistrationAuthorityImpl) issueCertificateInner(
 	acctID accountID,
 	oID orderID,
 	issuerNameID issuance.IssuerNameID,
-	logEvent *certificateRequestEvent) (core.Certificate, error) {
+	logEvent *certificateRequestEvent,
+	typeIdentifier string) (core.Certificate, error) {
 	emptyCert := core.Certificate{}
 	if acctID <= 0 {
 		return emptyCert, berrors.MalformedError("invalid account ID: %d", acctID)
@@ -1164,6 +1173,7 @@ func (ra *RegistrationAuthorityImpl) issueCertificateInner(
 		RegistrationID: int64(acctID),
 		OrderID:        int64(oID),
 		IssuerNameID:   int64(issuerNameID),
+		TypeIdentifier: typeIdentifier,
 	}
 
 	// wrapError adds a prefix to an error. If the error is a boulder error then
@@ -1194,6 +1204,7 @@ func (ra *RegistrationAuthorityImpl) issueCertificateInner(
 		SCTs:           scts,
 		RegistrationID: int64(acctID),
 		OrderID:        int64(oID),
+		TypeIdentifier: typeIdentifier,
 	})
 	if err != nil {
 		return emptyCert, wrapError(err, "issuing certificate for precertificate")
@@ -1571,7 +1582,6 @@ func (ra *RegistrationAuthorityImpl) recordValidation(ctx context.Context, authI
 func (ra *RegistrationAuthorityImpl) PerformValidation(
 	ctx context.Context,
 	req *rapb.PerformValidationRequest) (*corepb.Authorization, error) {
-
 	// Clock for start of PerformValidation.
 	vStart := ra.clk.Now()
 
@@ -1664,7 +1674,6 @@ func (ra *RegistrationAuthorityImpl) PerformValidation(
 			},
 		}
 		res, err := ra.VA.PerformValidation(vaCtx, &req)
-
 		challenge := &authz.Challenges[challIndex]
 		var prob *probs.ProblemDetails
 
@@ -1691,10 +1700,9 @@ func (ra *RegistrationAuthorityImpl) PerformValidation(
 			challenge.ValidationRecord = records
 		}
 
-		if !challenge.RecordsSane() && prob == nil {
+		if challenge.Type != core.ChallengeTypeTrustedJWT && !challenge.RecordsSane() && prob == nil {
 			prob = probs.ServerInternal("Records for validation failed sanity check")
 		}
-
 		if prob != nil {
 			challenge.Status = core.StatusInvalid
 			challenge.Error = prob
@@ -2353,20 +2361,30 @@ func (ra *RegistrationAuthorityImpl) NewOrder(ctx context.Context, req *rapb.New
 		return nil, errIncompleteGRPCRequest
 	}
 
+	var typeIdentifier identifier.IdentifierType
+	if req.TypeIdentifier == "dns" {
+		typeIdentifier = identifier.DNS
+	} else {
+		typeIdentifier = identifier.JWT
+	}
+
 	newOrder := &sapb.NewOrderRequest{
 		RegistrationID: req.RegistrationID,
 		Names:          core.UniqueLowerNames(req.Names),
+		TypeIdentifier: req.TypeIdentifier,
 	}
 
 	if len(newOrder.Names) > ra.maxNames {
 		return nil, berrors.MalformedError(
 			"Order cannot contain more than %d DNS names", ra.maxNames)
 	}
-
-	// Validate that our policy allows issuing for each of the names in the order
-	err := ra.checkOrderNames(newOrder.Names)
-	if err != nil {
-		return nil, err
+	var err error
+	if req.TypeIdentifier == "dns" {
+		// Validate that our policy allows issuing for each of the names in the order
+		err = ra.checkOrderNames(newOrder.Names)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	err = wildcardOverlap(newOrder.Names)
@@ -2507,7 +2525,7 @@ func (ra *RegistrationAuthorityImpl) NewOrder(ctx context.Context, req *rapb.New
 	var newAuthzs []*corepb.Authorization
 	for _, name := range missingAuthzNames {
 		pb, err := ra.createPendingAuthz(ctx, newOrder.RegistrationID, identifier.ACMEIdentifier{
-			Type:  identifier.DNS,
+			Type:  typeIdentifier,
 			Value: name,
 		})
 		if err != nil {

@@ -71,13 +71,14 @@ message Registration {
 
 message Authorization {
   string id = 1;
-  string identifier = 2;
+  string identifier = 2; // IdentifierValue
   int64 registrationID = 3;
   string status = 4;
   int64 expires = 5; // Unix timestamp (nanoseconds)
   repeated core.Challenge challenges = 6;
   reserved 7; // previously combinations
   reserved 8; // previously v2
+  string typeIdentifier = 9;
 }
 
 message Order {
@@ -92,4 +93,5 @@ message Order {
   bool beganProcessing = 9;
   int64 created = 10;
   repeated int64 v2Authorizations = 11;
+  string typeIdentifier = 12;
 }

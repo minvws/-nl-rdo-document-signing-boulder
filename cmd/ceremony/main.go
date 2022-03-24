@@ -426,7 +426,7 @@ func openSigner(cfg PKCS11SigningConfig, pubKey crypto.PublicKey) (crypto.Signer
 }
 
 func signAndWriteCert(tbs, issuer *x509.Certificate, subjectPubKey crypto.PublicKey, signer crypto.Signer, certPath string, skipLints []string) error {
-	err := linter.Check(tbs, subjectPubKey, issuer, signer, skipLints)
+	err := linter.Check(tbs, subjectPubKey, issuer, signer, skipLints, "dns")
 	if err != nil {
 		return fmt.Errorf("certificate failed pre-issuance lint: %w", err)
 	}

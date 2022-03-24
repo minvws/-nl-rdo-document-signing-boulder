@@ -54,15 +54,16 @@ type AcmeChallenge string
 // These types are the available challenges
 // TODO(#5009): Make this a custom type as well.
 const (
-	ChallengeTypeHTTP01    = AcmeChallenge("http-01")
-	ChallengeTypeDNS01     = AcmeChallenge("dns-01")
-	ChallengeTypeTLSALPN01 = AcmeChallenge("tls-alpn-01")
+	ChallengeTypeHTTP01     = AcmeChallenge("http-01")
+	ChallengeTypeDNS01      = AcmeChallenge("dns-01")
+	ChallengeTypeTLSALPN01  = AcmeChallenge("tls-alpn-01")
+	ChallengeTypeTrustedJWT = AcmeChallenge("trusted-jwt-01")
 )
 
 // IsValid tests whether the challenge is a known challenge
 func (c AcmeChallenge) IsValid() bool {
 	switch c {
-	case ChallengeTypeHTTP01, ChallengeTypeDNS01, ChallengeTypeTLSALPN01:
+	case ChallengeTypeHTTP01, ChallengeTypeDNS01, ChallengeTypeTLSALPN01, ChallengeTypeTrustedJWT:
 		return true
 	default:
 		return false
@@ -143,6 +144,11 @@ type Registration struct {
 	Status AcmeStatus `json:"status"`
 }
 
+type ChallengeRequirement struct {
+	RequirementType    string `json:"requirementType,omitempty"`
+	RequirementContext string `json:"requirementContext,omitempty"`
+}
+
 // ValidationRecord represents a validation attempt against a specific URL/hostname
 // and the IP addresses that were resolved and used
 type ValidationRecord struct {
@@ -216,6 +222,9 @@ type Challenge struct {
 	// set that way and should be renamed to "KeyAuthorization".
 	// TODO(@cpu): Rename `ProvidedKeyAuthorization` to `KeyAuthorization`.
 	ProvidedKeyAuthorization string `json:"keyAuthorization,omitempty"`
+
+	// Contains extra requirements a challenge must complete before challenge will be accepted
+	ChallengeRequirement []ChallengeRequirement `json:"challengeRequirement,omitempty"`
 
 	// Contains information about URLs used or redirected to and IPs resolved and
 	// used

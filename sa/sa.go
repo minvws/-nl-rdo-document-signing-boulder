@@ -941,18 +941,17 @@ func (ssa *SQLStorageAuthority) NewOrderAndAuthzs(ctx context.Context, req *sapb
 				return nil, err
 			}
 		}
-
 		// Second, insert the new order.
 		order := &orderModel{
 			RegistrationID: req.NewOrder.RegistrationID,
 			Expires:        time.Unix(0, req.NewOrder.Expires),
 			Created:        ssa.clk.Now(),
+			TypeIdentifier: req.NewOrder.TypeIdentifier,
 		}
 		err := txWithCtx.Insert(order)
 		if err != nil {
 			return nil, err
 		}
-
 		// Third, insert all of the orderToAuthz relations.
 		inserter, err := db.NewMultiInserter("orderToAuthz2", "orderID, authzID", "")
 		if err != nil {
@@ -974,7 +973,6 @@ func (ssa *SQLStorageAuthority) NewOrderAndAuthzs(ctx context.Context, req *sapb
 		if err != nil {
 			return nil, err
 		}
-
 		// Fourth, insert all of the requestedNames.
 		inserter, err = db.NewMultiInserter("requestedNames", "orderID, reversedName", "")
 		if err != nil {
@@ -990,13 +988,11 @@ func (ssa *SQLStorageAuthority) NewOrderAndAuthzs(ctx context.Context, req *sapb
 		if err != nil {
 			return nil, err
 		}
-
 		// Fifth, insert the FQDNSet entry for the order.
 		err = addOrderFQDNSet(txWithCtx, req.NewOrder.Names, order.ID, order.RegistrationID, order.Expires)
 		if err != nil {
 			return nil, err
 		}
-
 		// Finally, build the overall Order PB and return it.
 		return &corepb.Order{
 			// ID and Created were auto-populated on the order model when it was inserted.
@@ -1010,6 +1006,7 @@ func (ssa *SQLStorageAuthority) NewOrderAndAuthzs(ctx context.Context, req *sapb
 			V2Authorizations: append(req.NewOrder.V2Authorizations, newAuthzIDs...),
 			// A new order is never processing because it can't be finalized yet.
 			BeganProcessing: false,
+			TypeIdentifier:  req.NewOrder.TypeIdentifier,
 		}, nil
 	})
 	if err != nil {
@@ -1880,7 +1877,8 @@ func (ssa *SQLStorageAuthority) GetValidOrderAuthorizations2(ctx context.Context
 
 	byName := make(map[string]authzModel)
 	for _, am := range ams {
-		if uintToIdentifierType[am.IdentifierType] != string(identifier.DNS) {
+		if uintToIdentifierType[am.IdentifierType] != string(identifier.DNS) &&
+			uintToIdentifierType[am.IdentifierType] != string(identifier.JWT) {
 			return nil, fmt.Errorf("unknown identifier type: %q on authz id %d", am.IdentifierType, am.ID)
 		}
 		existing, present := byName[am.IdentifierValue]
