@@ -25,12 +25,12 @@ import (
 // the primary public interface of this package, but it can be inefficient;
 // creating a new signer and a new lint registry are expensive operations which
 // performance-sensitive clients may want to cache.
-func Check(tbs *x509.Certificate, subjectPubKey crypto.PublicKey, realIssuer *x509.Certificate, realSigner crypto.Signer, skipLints []string) error {
+func Check(tbs *x509.Certificate, subjectPubKey crypto.PublicKey, realIssuer *x509.Certificate, realSigner crypto.Signer, skipLints []string, typeIdentifier string) error {
 	linter, err := New(realIssuer, realSigner, skipLints)
 	if err != nil {
 		return err
 	}
-	return linter.Check(tbs, subjectPubKey)
+	return linter.Check(tbs, subjectPubKey, typeIdentifier)
 }
 
 // Linter is capable of linting a to-be-signed (TBS) certificate. It does so by
@@ -67,12 +67,12 @@ func New(realIssuer *x509.Certificate, realSigner crypto.Signer, skipLints []str
 // Check signs the given TBS certificate using the Linter's fake issuer cert and
 // private key, then runs the resulting certificate through all non-filtered
 // lints. It returns an error if any lint fails.
-func (l Linter) Check(tbs *x509.Certificate, subjectPubKey crypto.PublicKey) error {
+func (l Linter) Check(tbs *x509.Certificate, subjectPubKey crypto.PublicKey, typeIdentifier string) error {
 	cert, err := makeLintCert(tbs, subjectPubKey, l.issuer, l.signer)
 	if err != nil {
 		return err
 	}
-	return check(cert, l.registry)
+	return check(cert, l.registry, typeIdentifier)
 }
 
 func makeSigner(realSigner crypto.Signer) (crypto.Signer, error) {
@@ -174,16 +174,24 @@ func makeLintCert(tbs *x509.Certificate, subjectPubKey crypto.PublicKey, issuer 
 	return lintCert, nil
 }
 
-func check(lintCert *zlintx509.Certificate, lints lint.Registry) error {
+func check(lintCert *zlintx509.Certificate, lints lint.Registry, typeIdentifier string) error {
+	lintsThatMayFailForTypeIdentifier := map[string]string{
+		"e_dnsname_not_valid_tld":     "jwt",
+		"n_san_iana_pub_suffix_empty": "jwt",
+	}
 	lintRes := zlint.LintCertificateEx(lintCert, lints)
 	if lintRes.NoticesPresent || lintRes.WarningsPresent || lintRes.ErrorsPresent || lintRes.FatalsPresent {
 		var failedLints []string
 		for lintName, result := range lintRes.Results {
-			if result.Status > lint.Pass {
+			if result.Status > lint.Pass &&
+				//When typeIdentifier == JWT lint DNSName not valid may fail
+				!(lintsThatMayFailForTypeIdentifier[lintName] == typeIdentifier) {
 				failedLints = append(failedLints, lintName)
 			}
 		}
-		return fmt.Errorf("failed lints: %s", strings.Join(failedLints, ", "))
+		if len(failedLints) > 0 {
+			return fmt.Errorf("failed lints: %s", strings.Join(failedLints, ", "))
+		}
 	}
 	return nil
 }

@@ -364,6 +364,9 @@ func ValidEmail(address string) error {
 // TODO(#5816): Consider making this method private, as it has no callers
 // outside of this package.
 func (pa *AuthorityImpl) WillingToIssue(id identifier.ACMEIdentifier) error {
+	if id.Type == identifier.JWT {
+		return nil
+	}
 	if id.Type != identifier.DNS {
 		return errInvalidIdentifier
 	}
@@ -551,10 +554,13 @@ func (pa *AuthorityImpl) ChallengesFor(identifier identifier.ACMEIdentifier) ([]
 	challenges := []core.Challenge{}
 
 	token := core.NewToken()
-
-	// If the identifier is for a DNS wildcard name we only
-	// provide a DNS-01 challenge as a matter of CA policy.
-	if strings.HasPrefix(identifier.Value, "*.") {
+	if string(identifier.Type) == "jwt" {
+		if pa.ChallengeTypeEnabled(core.ChallengeTypeTrustedJWT) {
+			challenges = append(challenges, core.TrustedJWTChallenge01(token))
+		}
+		// If the identifier is for a DNS wildcard name we only
+		// provide a DNS-01 challenge as a matter of CA policy.
+	} else if strings.HasPrefix(identifier.Value, "*.") {
 		// We must have the DNS-01 challenge type enabled to create challenges for
 		// a wildcard identifier per LE policy.
 		if !pa.ChallengeTypeEnabled(core.ChallengeTypeDNS01) {

@@ -184,6 +184,7 @@ message NewOrderRequest {
   int64 expires = 2;
   repeated string names = 3;
   repeated int64 v2Authorizations = 4;
+  string typeIdentifier = 5;
 }
 
 message NewOrderAndAuthzsRequest {

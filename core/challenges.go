@@ -25,3 +25,9 @@ func DNSChallenge01(token string) Challenge {
 func TLSALPNChallenge01(token string) Challenge {
 	return newChallenge(ChallengeTypeTLSALPN01, token)
 }
+
+// TrustedJWTChallenge01 constructs a random jwt challenge. If token is empty a random token
+// will be generated, otherwise the provided token is used.
+func TrustedJWTChallenge01(token string) Challenge {
+	return newChallenge(ChallengeTypeTrustedJWT, token)
+}

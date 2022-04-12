@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/letsencrypt/boulder/identifier"
 	"math"
 	"net"
 	"strconv"
@@ -376,6 +377,7 @@ type orderModel struct {
 	Error             []byte
 	CertificateSerial string
 	BeganProcessing   bool
+	TypeIdentifier    string
 }
 
 type requestedNameModel struct {
@@ -420,6 +422,7 @@ func modelToOrder(om *orderModel) (*corepb.Order, error) {
 		Created:           om.Created.UnixNano(),
 		CertificateSerial: om.CertificateSerial,
 		BeganProcessing:   om.BeganProcessing,
+		TypeIdentifier:    om.TypeIdentifier,
 	}
 	if len(om.Error) > 0 {
 		var problem corepb.ProblemDetails
@@ -436,23 +439,27 @@ func modelToOrder(om *orderModel) (*corepb.Order, error) {
 }
 
 var challTypeToUint = map[string]uint8{
-	"http-01":     0,
-	"dns-01":      1,
-	"tls-alpn-01": 2,
+	"http-01":        0,
+	"dns-01":         1,
+	"tls-alpn-01":    2,
+	"trusted-jwt-01": 3,
 }
 
 var uintToChallType = map[uint8]string{
 	0: "http-01",
 	1: "dns-01",
 	2: "tls-alpn-01",
+	3: "trusted-jwt-01",
 }
 
 var identifierTypeToUint = map[string]uint8{
 	"dns": 0,
+	"jwt": 1,
 }
 
 var uintToIdentifierType = map[uint8]string{
 	0: "dns",
+	1: "jwt",
 }
 
 var statusToUint = map[core.AcmeStatus]uint8{
@@ -513,11 +520,18 @@ func hasMultipleNonPendingChallenges(challenges []*corepb.Challenge) bool {
 // authzPBToModel converts a protobuf authorization representation to the
 // authzModel storage representation.
 func authzPBToModel(authz *corepb.Authorization) (*authzModel, error) {
+	var identType uint8
+	if authz.TypeIdentifier == string(identifier.DNS) {
+		identType = 0
+	} else {
+		identType = 1
+	}
 	am := &authzModel{
 		IdentifierValue: authz.Identifier,
 		RegistrationID:  authz.RegistrationID,
 		Status:          statusToUint[core.AcmeStatus(authz.Status)],
 		Expires:         time.Unix(0, authz.Expires).UTC(),
+		IdentifierType:  identType,
 	}
 	if authz.Id != "" {
 		// The v1 internal authorization objects use a string for the ID, the v2
@@ -640,12 +654,19 @@ func populateAttemptedFields(am authzModel, challenge *corepb.Challenge) error {
 }
 
 func modelToAuthzPB(am authzModel) (*corepb.Authorization, error) {
+	var identType string
+	if am.IdentifierType == 0 {
+		identType = string(identifier.DNS)
+	} else {
+		identType = string(identifier.JWT)
+	}
 	pb := &corepb.Authorization{
 		Id:             fmt.Sprintf("%d", am.ID),
 		Status:         string(uintToStatus[am.Status]),
 		Identifier:     am.IdentifierValue,
 		RegistrationID: am.RegistrationID,
 		Expires:        am.Expires.UTC().UnixNano(),
+		TypeIdentifier: identType,
 	}
 	// Populate authorization challenge array. We do this by iterating through
 	// the challenge type bitmap and creating a challenge of each type if its

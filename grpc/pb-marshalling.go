@@ -321,7 +321,7 @@ func PBToAuthz(pb *corepb.Authorization) (core.Authorization, error) {
 	expires := time.Unix(0, pb.Expires).UTC()
 	authz := core.Authorization{
 		ID:             pb.Id,
-		Identifier:     identifier.ACMEIdentifier{Type: identifier.DNS, Value: pb.Identifier},
+		Identifier:     identifier.ACMEIdentifier{Type: identifier.IdentifierType(pb.Identifier), Value: pb.Identifier},
 		RegistrationID: pb.RegistrationID,
 		Status:         core.AcmeStatus(pb.Status),
 		Expires:        &expires,

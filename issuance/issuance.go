@@ -597,6 +597,7 @@ type IssuanceRequest struct {
 	IncludeMustStaple bool
 	IncludeCTPoison   bool
 	SCTList           []ct.SignedCertificateTimestamp
+	TypeIdentifier    string
 }
 
 // Issue generates a certificate from the provided issuance request and
@@ -650,7 +651,7 @@ func (i *Issuer) Issue(req *IssuanceRequest) ([]byte, error) {
 
 	// check that the tbsCertificate is properly formed by signing it
 	// with a throwaway key and then linting it using zlint
-	err = i.Linter.Check(template, req.PublicKey)
+	err = i.Linter.Check(template, req.PublicKey, req.TypeIdentifier)
 	if err != nil {
 		return nil, fmt.Errorf("tbsCertificate linting failed: %w", err)
 	}
@@ -679,7 +680,7 @@ func containsCTPoison(extensions []pkix.Extension) bool {
 // RequestFromPrecert constructs a final certificate IssuanceRequest matching
 // the provided precertificate. It returns an error if the precertificate doesn't
 // contain the CT poison extension.
-func RequestFromPrecert(precert *x509.Certificate, scts []ct.SignedCertificateTimestamp) (*IssuanceRequest, error) {
+func RequestFromPrecert(precert *x509.Certificate, scts []ct.SignedCertificateTimestamp, typeIdenfier string) (*IssuanceRequest, error) {
 	if !containsCTPoison(precert.Extensions) {
 		return nil, errors.New("provided certificate doesn't contain the CT poison extension")
 	}
@@ -692,6 +693,7 @@ func RequestFromPrecert(precert *x509.Certificate, scts []ct.SignedCertificateTi
 		DNSNames:          precert.DNSNames,
 		IncludeMustStaple: ContainsMustStaple(precert.Extensions),
 		SCTList:           scts,
+		TypeIdentifier:    typeIdenfier,
 	}, nil
 }
 

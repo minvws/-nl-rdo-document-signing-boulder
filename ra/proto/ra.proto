@@ -8,6 +8,7 @@ import "google/protobuf/empty.proto";
 
 service RegistrationAuthority {
   rpc NewRegistration(core.Registration) returns (core.Registration) {}
+  rpc UpdateAuthorization(UpdateAuthorizationRequest) returns (core.Authorization) {}
   rpc UpdateRegistration(UpdateRegistrationRequest) returns (core.Registration) {}
   rpc PerformValidation(PerformValidationRequest) returns (core.Authorization) {}
   rpc RevokeCertificateWithReg(RevokeCertificateWithRegRequest) returns (google.protobuf.Empty) {}
@@ -64,6 +65,7 @@ message AdministrativelyRevokeCertificateRequest {
 message NewOrderRequest {
   int64 registrationID = 1;
   repeated string names = 2;
+  string typeIdentifier = 3;
 }
 
 message FinalizeOrderRequest {
