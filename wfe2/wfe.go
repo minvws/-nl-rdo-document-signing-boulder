@@ -2198,6 +2198,7 @@ func (wfe *WebFrontEndImpl) NewOrder(
 			firstIdent = ident.Type
 		} else {
 			wfe.sendError(response, logEvent, probs.Malformed("Only one identifier type supported"), nil)
+			return
 		}
 		if ident.Type != identifier.DNS && ident.Type != identifier.JWT {
 			wfe.sendError(response, logEvent,
@@ -2207,17 +2208,23 @@ func (wfe *WebFrontEndImpl) NewOrder(
 			return
 		}
 		if ident.Value == "" {
-			wfe.sendError(response, logEvent, probs.Malformed("NewOrder request included empty domain name"), nil)
+			var item = "domain name"
+			if ident.Type == identifier.JWT {
+				item = "token"
+			}
+			wfe.sendError(response, logEvent, probs.Malformed("NewOrder request included empty %s", item), nil)
 			return
 		}
 		names[i] = ident.Value
+
 		// The max length of a CommonName is 64 bytes. Check to make sure
 		// at least one DNS name meets this requirement to be promoted to
 		// the CN.
-		if len(names[i]) <= 64 {
+		if len(ident.Value) <= 64 {
 			hasValidCNLen = true
 		}
 	}
+
 	if !hasValidCNLen && features.Enabled(features.RequireCommonName) {
 		wfe.sendError(response, logEvent,
 			probs.RejectedIdentifier("NewOrder request did not include a SAN short enough to fit in CN"),

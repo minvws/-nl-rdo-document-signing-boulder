@@ -278,6 +278,7 @@ message GetValidOrderAuthorizationsRequest {
 message GetOrderForNamesRequest {
   int64 acctID = 1;
   repeated string names = 2;
+  string typeIdentifier = 3;
 }
 
 message FinalizeOrderRequest {

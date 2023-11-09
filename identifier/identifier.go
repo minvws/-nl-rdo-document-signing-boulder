@@ -31,3 +31,12 @@ func DNSIdentifier(domain string) ACMEIdentifier {
 		Value: domain,
 	}
 }
+
+// JWTIdentifier is a convenience function for creating an ACMEIdentifier with
+// Type JWT for a given token.
+func JWTIdentifier(token string) ACMEIdentifier {
+	return ACMEIdentifier{
+		Type:  JWT,
+		Value: token,
+	}
+}

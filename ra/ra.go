@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jmhodges/clock"
+	"github.com/letsencrypt/boulder/jwt"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/weppos/publicsuffix-go/publicsuffix"
 	"golang.org/x/crypto/ocsp"
@@ -1141,18 +1142,20 @@ func (ra *RegistrationAuthorityImpl) validateFinalizeRequest(
 		// TODO GB: Validate public key
 	} else {
 		err = csrlib.VerifyCSR(ctx, csr, ra.maxNames, &ra.keyPolicy, ra.PA)
-	}
-
-	if err != nil {
-		// VerifyCSR returns berror instances that can be passed through as-is
-		// without wrapping.
-		return nil, err
+		if err != nil {
+			// VerifyCSR returns berror instances that can be passed through as-is
+			// without wrapping.
+			return nil, err
+		}
 	}
 
 	// Dedupe, lowercase and sort both the names from the CSR and the names in the
 	// order.
 	csrNames := csrlib.NamesFromCSR(csr).SANs
-	orderNames := core.UniqueLowerNames(req.Order.Names)
+	orderNames := req.Order.Names
+	if req.Order.TypeIdentifier == string(identifier.DNS) {
+		orderNames = core.UniqueLowerNames(req.Order.Names)
+	}
 
 	// Immediately reject the request if the number of names differ
 	if len(orderNames) != len(csrNames) {
@@ -1402,6 +1405,7 @@ func domainsForRateLimiting(names []string) []string {
 			domains = append(domains, domain)
 		}
 	}
+
 	return core.UniqueLowerNames(domains)
 }
 
@@ -1539,7 +1543,7 @@ func (ra *RegistrationAuthorityImpl) checkCertificatesPerFQDNSetLimit(ctx contex
 	}
 }
 
-func (ra *RegistrationAuthorityImpl) checkNewOrderLimits(ctx context.Context, names []string, regID int64) error {
+func (ra *RegistrationAuthorityImpl) checkNewOrderLimits(ctx context.Context, names []string, regID int64, typeIdentifier string) error {
 	newOrdersPerAccountLimits := ra.rlPolicies.NewOrdersPerAccount()
 	if newOrdersPerAccountLimits.Enabled() {
 		started := ra.clk.Now()
@@ -2380,6 +2384,20 @@ func (ra *RegistrationAuthorityImpl) checkOrderNames(names []string) error {
 	return nil
 }
 
+// checkOrderNames validates that the RA's policy authority allows issuing for
+// each of the names in an order. If any of the names are unacceptable a
+// malformed or rejectedIdentifier error with suberrors for each rejected
+// identifier is returned.
+func (ra *RegistrationAuthorityImpl) checkOrderJWTs(names []string) error {
+	for _, name := range names {
+		if !jwt.IsValidJWT(name) {
+			return berrors.MalformedError("JWT is malformed")
+		}
+	}
+	return nil
+}
+
+
 // GenerateOCSP looks up a certificate's status, then requests a signed OCSP
 // response for it from the CA. If the certificate status is not available
 // or the certificate is expired, it returns berrors.NotFoundError.
@@ -2427,13 +2445,6 @@ func (ra *RegistrationAuthorityImpl) NewOrder(ctx context.Context, req *rapb.New
 		return nil, errIncompleteGRPCRequest
 	}
 
-	var typeIdentifier identifier.IdentifierType
-	if req.TypeIdentifier == "dns" {
-		typeIdentifier = identifier.DNS
-	} else {
-		typeIdentifier = identifier.JWT
-	}
-
 	newOrder := &sapb.NewOrderRequest{
 		RegistrationID: req.RegistrationID,
 		Names:          core.UniqueLowerNames(req.Names),
@@ -2452,6 +2463,12 @@ func (ra *RegistrationAuthorityImpl) NewOrder(ctx context.Context, req *rapb.New
 			return nil, err
 		}
 	}
+	if req.TypeIdentifier == "jwt" {
+		err = ra.checkOrderJWTs(newOrder.Names)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	err = wildcardOverlap(newOrder.Names)
 	if err != nil {
@@ -2463,7 +2480,9 @@ func (ra *RegistrationAuthorityImpl) NewOrder(ctx context.Context, req *rapb.New
 	existingOrder, err := ra.SA.GetOrderForNames(ctx, &sapb.GetOrderForNamesRequest{
 		AcctID: newOrder.RegistrationID,
 		Names:  newOrder.Names,
+		TypeIdentifier: newOrder.TypeIdentifier,
 	})
+
 	// If there was an error and it wasn't an acceptable "NotFound" error, return
 	// immediately
 	if err != nil && !errors.Is(err, berrors.NotFound) {
@@ -2483,7 +2502,7 @@ func (ra *RegistrationAuthorityImpl) NewOrder(ctx context.Context, req *rapb.New
 	}
 
 	// Check if there is rate limit space for issuing a certificate.
-	err = ra.checkNewOrderLimits(ctx, newOrder.Names, newOrder.RegistrationID)
+	err = ra.checkNewOrderLimits(ctx, newOrder.Names, newOrder.RegistrationID, newOrder.TypeIdentifier)
 	if err != nil {
 		return nil, err
 	}
@@ -2581,8 +2600,20 @@ func (ra *RegistrationAuthorityImpl) NewOrder(ctx context.Context, req *rapb.New
 	// authorization for each.
 	var newAuthzs []*corepb.Authorization
 	for _, name := range missingAuthzNames {
+		idx := -1
+		for i, req_name := range req.Names {
+			if req_name == name {
+				idx = i
+				break
+			}
+		}
+
+		if idx == -1 {
+			return nil, berrors.InternalServerError("cannot find index of authz name in request")
+		}
+
 		pb, err := ra.createPendingAuthz(newOrder.RegistrationID, identifier.ACMEIdentifier{
-			Type:  typeIdentifier,
+			Type:  identifier.IdentifierType(req.TypeIdentifier),
 			Value: name,
 		})
 		if err != nil {

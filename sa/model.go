@@ -385,7 +385,6 @@ type orderModel struct {
 	Error             []byte
 	CertificateSerial string
 	BeganProcessing   bool
-	TypeIdentifier    core.TypeIdentifier
 }
 
 type requestedNameModel struct {
@@ -432,7 +431,6 @@ func modelToOrder(om *orderModel) (*corepb.Order, error) {
 		Created:           timestamppb.New(om.Created),
 		CertificateSerial: om.CertificateSerial,
 		BeganProcessing:   om.BeganProcessing,
-		TypeIdentifier:    om.TypeIdentifier.String(),
 	}
 	if len(om.Error) > 0 {
 		var problem corepb.ProblemDetails
